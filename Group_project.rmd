@@ -1,0 +1,949 @@
+---
+title: Group Project Influenza
+authors:
+date: 21/11/2024
+output: 
+  html_document:
+    theme: paper
+    highlight: tango
+    code_folding: show
+    toc: true
+    number_sections: true
+    toc_float: true
+    toc_depth: 3
+---
+
+Influenza causes up to 650,000 deaths annually, with children and the elderly being the most vulnerable. While vaccination helps reduce outbreaks, current vaccines don't always offer full protection, even in healthy individuals. To develop better vaccines, it's crucial to understand why they work for some and not for others.
+
+The FluPRINT dataset is a comprehensive resource containing immunological data from 740 individuals across eight clinical studies conducted between 2007 and 2015 at Stanford University. This project will analyze the dataset using R to explore the factors behind vaccine immunity.
+
+In this project, we will analyze the FluPRINT dataset using R, a powerful statistical programming language and analysis platform. This document includes R code used to explore, analyze, and visualize the dataset. Through these analyses, we aim to uncover insights that contribute to a better understanding of vaccine immunity.
+
+1. To enable data manipulation and visualization, tidyverse and car are installed, providing useful packages like ggplot2 and dplyr:
+
+```{r}
+
+install.packages("tidyverse") 
+install.packages("car")
+
+```
+
+2. The tidyverse and car packages are loaded, making its functions available for use in the analysis. This package includes tools for data manipulation, visualization, and cleaning.
+
+```{r}
+
+library(tidyverse) 
+library(dplyr)
+library(ggplot2)
+library(car)
+library(reshape2)
+
+```
+
+3. The fluprint_export.csv file is imported into R as a dataframe called Data. This step loads the dataset from the specified file path into the R environment for further analysis.
+
+```{r}
+
+Data <- read_csv("C:\\Users\\julie\\fluprint_export.csv")  
+
+```
+
+4. The head() function is used to display the first few rows (by default, 6 rows) of the dataset Data, giving a quick overview of its structure and contents.
+
+```{r}
+
+head(Data) 
+
+```
+
+5. The colnames() function is used to retrieve and display the names of the columns in the Data dataset. This helps to understand the structure of the dataset and identify the variables available for analysis.
+
+```{r}
+
+colnames(Data) 
+
+```
+
+6. The summary() function provides a summary of each column in the Data dataset. For numeric columns, it shows key statistics such as the minimum, maximum, median, mean, and quartiles. For categorical variables, it displays the frequency of each category, giving a quick overview of the dataset’s distribution.
+
+```{r}
+
+summary(Data)
+
+```
+
+7. Now that we have an understanding of how the columns and data look, we’ll proceed with cleaning the dataset. We will remove columns that will not contribute to our metadata. These columns include name, name_formatted, subset, units, data, mesurment_id, and assay. After cleaning, we check the first few rows of the dataset to ensure the changes have been made correctly. 
+
+```{r}
+
+df_cleaned <- Data %>% 
+  select(-name, -name_formatted, -subset, -units, -data, -mesurment_id, -assay) 
+
+head(df_cleaned)
+
+```
+
+8. With the cleaned dataset in hand, we further created a metadata table by removing any duplicate rows. This will ensure that we only have unique records. We sort the meta_data table by donor_id in ascending order to organize the data and make it easier to track and analyze individual donors. This ensures a more structured and systematic dataset for further analysis.
+
+```{r}
+
+meta_data <- df_cleaned %>% 
+  distinct() %>%  # Keep only unique rows
+  arrange(donor_id)  # Order the rows by donor_id in ascending order
+
+head(meta_data)
+
+```
+
+9. After this, we only want to focus on the variables that are essential for the analysis. We create a new dataset, df_variables, by selecting just the columns we need: donor_id, name, subset, data, and mesurment_id. This simplifies the dataset, allowing us to focus on the most relevant aspects of the data.
+
+```{r}
+
+df_variables <- Data %>% 
+  select(donor_id, name, subset, data, mesurment_id) 
+
+head(df_variables)
+
+```
+
+10. Now, to facilitate easier analysis, we will pivot the data into a wider format. By using pivot_wider(), we reorganize the df_variables dataset. Specifically, we will keep donor_id and mesurment_id as identifiers, and for each name value, we will create a new column filled with corresponding data values. This reshaping helps us compare different variables side by side for each donor.
+
+```{r}
+
+df_wide <- df_variables %>% 
+  pivot_wider( 
+    id_cols = c(donor_id, mesurment_id),  # Columns to keep as identifiers 
+    names_from = name,                   # Use the `name` column to create new column names 
+    values_from = data                   # Fill these columns with `data` values 
+  ) 
+
+head(df_wide)
+
+```
+
+11. To aggregate the data, we now group it by donor_id and summarize the values for each donor. We calculate the sum of all the variables for each donor, using na.rm = TRUE to ignore missing values. This step helps us summarize the data into donor-level statistics. We check this result by looking at the first 20 rows.
+
+```{r}
+
+df_combined <- df_wide %>% 
+  group_by(donor_id) %>% 
+  summarize(across(everything(), ~ if (all(is.na(.x))) NA else sum(.x, na.rm = TRUE))) %>% 
+  ungroup() 
+
+head(df_combined, 20)
+
+```
+
+12. To identify missing values, we count occurrences of the string "NULL" in each column of the dataset. This helps us understand how many entries in each column are marked as missing (represented by "NULL").
+
+```{r}
+
+missing_values_long <- data.frame( 
+  Column = names(Data), 
+  MissingCount = sapply(Data, function(x) sum(x == "NULL")) 
+)
+
+missing_values_long
+
+```
+
+13.First, the variables with more than 450 NA values are filtered out so that we can evaluate which variables have the least missing values, and thus the most information.
+
+```{r}
+
+# Count the number of NAs in each column 
+na_counts <- colSums(is.na(df_combined)) 
+
+# Filter out columns with more than 450 NAs 
+df_filtered <- df_combined[, na_counts <= 450] 
+
+# View the filtered dataframe 
+print(df_filtered) 
+
+```
+
+14. First the IL-6 levels per patient in male and female are considered: 
+before that, the two data sets are merged back together since variables are used from both tables.
+
+```{r}
+
+# Merge datasets by 'donor_id'
+df_new <- merge(meta_data, df_combined, by = "donor_id")
+
+# Filter by gender
+data_male <- df_new %>% filter(gender == "Male")
+data_female <- df_new %>% filter(gender == "Female")
+
+# Plot males
+ggplot(data_male, aes(x = donor_id, y = IL6)) +
+  geom_point(color = "blue") +
+  labs(title = "IL-6 level per patient (Males)", x = "Donor ID", y = "IL-6 Level") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot females
+ggplot(data_female, aes(x = donor_id, y = IL6)) +
+  geom_point(color = "pink") +
+  labs(title = "IL-6 level per patient (Females)", x = "Donor ID", y = "IL-6 Level") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+15. Then the relationship between the variables 'effector memory CD4+ T cells' and 'vaccine type' are viewed in a boxplot.
+
+```{r}
+# Replace "null" with NA
+df_new[df_new == "NULL"] <- NA
+
+# Remove NAs
+df_new <- df_new %>% filter(!is.na(vaccine))
+
+```
+
+```{r}
+
+# Make a boxplot of the effector memory CD4+ T cells and the vaccine types
+ggplot(df_new, aes(x = vaccine, y = `effector memory CD4+ T cells`, fill = vaccine)) + 
+  geom_boxplot(outlier.colour = "red", outlier.shape = 16, outlier.size = 2) + 
+  theme_minimal() + 
+  labs( 
+    title = "Comparison of Vaccine Types to Effector Memory CD4+ T Cells", 
+    x = "Vaccine Type", 
+    y = "Effector Memory CD4+ T Cells" 
+  ) 
+
+```
+
+16. Next, we look at whether the outcome of the vaccine types differs between men and women so that this can be taken into account, if necessary.
+
+```{r}
+
+# Make a boxplot of the effector memory CD4+ T cells and the vaccine types by gender
+ggplot(df_new, aes(x = vaccine, y = `effector memory CD4+ T cells`, fill = vaccine)) + 
+  geom_boxplot(outlier.colour = "red", outlier.shape = 16, outlier.size = 2) + 
+  theme_minimal() + 
+  labs( 
+    title = "Comparison of Vaccine Types to Effector Memory T Cells by Gender", 
+    x = "Vaccine Type", 
+    y = "Effector Memory T Cells" 
+  ) + 
+  facet_wrap(~ gender)  # Facet by gender 
+
+```
+
+17.Further work is done on vaccine type and effector memory CD4+ T cells, forming the first hypothesis: Does the type of vaccine administered to the patient influence the number of effector memory CD4+ T cells present in the patient? 
+The effector memory CD4+ T cells play an important role in the adaptive immune system, with these cells being activated as soon as there is contact with an antigen. These cells form a memory for the antigen and provide a rapid immune response upon repeated exposure to that antigen. Thus, this hypothesis examines whether certain vaccine types are more effective in promoting long-term protection.
+
+**HYPOTHESIS 1**
+
+18.for the first hypothesis, it is first considered whether the conditions of the anova test are met, i.e. normality and homoscedasticity are considered.
+
+```{r}
+
+# Fit ANOVA model
+anova_model <- aov(`effector memory CD4+ T cells` ~ vaccine, data = df_new)
+
+# Extract residuals
+residuals <- residuals(anova_model)
+
+# 1. Test for Normality
+shapiro_test <- shapiro.test(residuals)
+
+# QQ Plot for Normality
+qq_plot <- ggplot(data.frame(residuals = residuals), aes(sample = residuals)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  theme_minimal() +
+  labs(title = "QQ Plot of Residuals (Normality Test)")
+
+# 2. Test for Homogeneity of Variance (Levene's Test)
+levene_test <- leveneTest(`effector memory CD4+ T cells` ~ vaccine, data = df_new)
+
+# Residuals vs Fitted Plot
+residuals_fitted_plot <- ggplot(data.frame(
+  fitted = fitted(anova_model),
+  residuals = residuals
+), aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Residuals vs Fitted Values (Homoscedasticity Test)",
+    x = "Fitted Values",
+    y = "Residuals"
+  )
+
+# 3. Diagnostic Plots
+par(mfrow = c(2, 2))
+plot(anova_model)
+
+# Print Test Results
+cat("Shapiro-Wilk Normality Test:\n")
+print(shapiro_test)
+
+cat("\nLevene's Test for Homogeneity of Variance:\n")
+print(levene_test)
+
+# Display Visual Diagnostics
+print(qq_plot)
+print(residuals_fitted_plot)
+```
+
+19. After inspecting the four key model assumptions (linearity, independence, homoscedasticity, and normality of residuals) using diagnostic plots, it was found that normality and homoscedasticity were not satisfied. However, the analysis remains valid due to the Central Limit Theorem, which ensures that as the sample size increases, residuals approach normality. Additionally, we assume homoscedasticity holds in the population, making this assumption reasonable.
+
+
+20. Fit a linear regression model with intercept = vaccine type 1. Now the relationship between vaccine type 1(the intercept) and the other vaccine types is considered.  
+
+```{r}
+
+df_new$vaccine <- as.factor(df_new$vaccine)
+df_new$vaccine <- relevel(df_new$vaccine, ref = "1")
+
+# Fit the linear regression model
+lm_model <- lm(`effector memory CD4+ T cells` ~ vaccine, data = df_new)
+
+# Summary of the model
+summary(lm_model)
+
+# Summary of the model
+lm_model_summary=summary(lm_model)
+
+conf_intervals <- confint(lm_model)
+
+# Combine summary and confidence intervals
+results <- cbind(
+  Estimate = coef(lm_model_summary),
+  `Lower 95%` = conf_intervals[, 1],
+  `Upper 95%` = conf_intervals[, 2]
+)
+
+# Show results
+print(results)
+
+```
+
+We set vaccine 1 as the reference group with an intercept of 10.6.
+
+Conclusion: 
+The linear regression model examines the relationship between the type of vaccine (predictor) and the number of effector memory CD4+ T cells (outcome). The reference category for the vaccine variable is the baseline vaccine (vaccine1), as indicated by the absence of a coefficient for it.  
+
+The F-test analysis revealed an overall highly significant effect of vaccination on the variability in the mean effector memory CD4+ T cell concentrations (p < 0.001). The model explains 9.53% of the variance in effector memory CD4+ T cells, as indicated by the R2 value of 0.0953, with a residual standard error of 6.963, reflecting the average deviation of observed values from predictions.   
+
+The intercept of 10.5863 cells/µL (95% CI: [9.04, 12.13]) for vaccine 1 is highly significant (p< 0.001), with the confidence interval not including zero, indicating that the mean concentration for vaccine 1 is significantly different from zero. 
+
+Vaccine4 shows a statistically significant positive effect, with a mean number of effector memory CD4+ T cells that is 4.35 cells/µL higher than vaccine1 (95% CI: [2.50, 6.20]). In contrast, vaccine5 has a borderline significant negative effect, with a mean number of effector memory CD4+ T cells that is 8.12 cells/µL lower than vaccine1 (95% CI: [-16.18, -0.06]). Vaccine2 and vaccine3 do not show significant effects, with p-values of 0.0589 and 0.4463, respectively. These findings indicate that the impact of vaccination on effector memory CD4+ T cells depends on the type of vaccine. 
+
+Upon further examination of the vaccines with significant effects, specifically vaccines 1, 4, and 5, a comparison is made by analyzing the boxplots shown further above. The average effect of vaccine 5 is notably lower in comparison to the other two, while vaccine 4 exhibits a slightly higher average effect than vaccine 1. When comparing males and females, the results suggest the same trend as observed previously, indicating no apparent difference in the response of the vaccines between genders based on the boxplots
+
+22.We check to see if age affects the effect of the vaccine type on the number of effector memory CD4+ T cells. We add 'visit_age' to the linear model to analyze this.
+
+```{r}
+
+# Ensure vaccine is a factor and relevel
+df_new$vaccine <- as.factor(df_new$vaccine)
+df_new$vaccine <- relevel(df_new$vaccine, ref = "1")
+
+# Fit the linear regression model with both vaccine and visit_age
+lm_model <- lm(`effector memory CD4+ T cells` ~ vaccine + visit_age, data = df_new)
+
+# Summary of the model
+summary(lm_model)
+
+```
+Conclusion:
+In this analysis, we expanded the previous model by adding age as an additional predictor to examine its effect alongside the vaccine type on the number of effector memory CD4+ T cells. This allows us to assess whether age influences the immune response, providing a more comprehensive understanding of the factors affecting effector memory CD4+ T cell concentrations.  
+
+The multivariate linear regression model shows significant effects of both vaccine type and age on effector memory CD4+ T cell concentrations. The overall model is highly significant (p < 0.001), explaining 11.03% of the variance (R² = 0.1103). The F-statistic of 6.816 (p <0.001) confirms the model’s significance. 
+
+
+The intercept of 7.4067 cells/µL (95% CI: [4.11, 10.70]) is significant, representing the mean concentration for vaccine 1 at a visit age of 0. Vaccine4 has a significant positive effect, with a mean of 4.17 cells/µL higher than vaccine1 (95% CI: [2.32, 6.01], p < 0.001). Vaccine2 shows a borderline significant positive effect (3.13 cells/µL higher, p = 0.0856), while vaccine3 and vaccine5 do not show significant effects (p = 0.4090 and p = 0.2368, respectively). 
+
+Visit_age also has a significant positive effect (p = 0.0322), with each unit increase in age associated with a 0.1525 cells/µL increase in effector memory CD4+ T cell concentration (95% CI: [0.013, 0.292]). 
+
+The boxplots show that vaccine4 has a notably higher average effect compared to vaccine1, while vaccine2 shows a smaller positive effect. No significant difference in vaccine response is observed between genders based on the boxplots. 
+
+Overall conclusion of hypothesis 1:
+The analysis of the FluPRINT dataset supports the hypothesis that the activation of effector memory T cells varies across different influenza vaccine types. Specifically, vaccine 4 showed a significantly higher activation of effector memory CD4+ T cells compared to vaccine 1, while vaccine 2 exhibited a borderline significant positive effect. In contrast, vaccine 3 and vaccine 5 did not show significant effects. These findings suggest that vaccine 4 may be more effective in stimulating long-term immunity than vaccine 1, while vaccine 3 and vaccine 5 appear less effective in this regard. 
+
+Additionally, age was found to have a significant impact on effector memory CD4+ T cell concentrations, with older individuals showing a higher immune response.  
+
+Overall, the results highlight that both vaccine type and age are important factors influencing immune responses to influenza vaccines. These insights suggest that vaccine strategies could be optimized based on these factors to improve outcomes, particularly in high-risk populations. 
+
+
+**HYPOTHESIS 2**
+
+The second hypothesis of this study is: “What is the relationship between different HLA cell counts and the release of IL-6 in response to influenza vaccination, based on the data from the FluPRINT dataset?” It investigates the relationship between different HLA cell types and IL-6 release in response to influenza vaccination. HLA molecules play a critical role in immune responses by presenting antigens to immune cells, influencing how the body reacts to infections and vaccines. Specifically, this study will compare the effects of various HLA cell counts on IL-6 release. Understanding the relationship between these HLA types and cytokine release could provide insights into how certain immune cells contribute to variability in vaccine responses and guide the development of more effective influenza vaccines.
+
+24. The 25th percentile (Q1) and 75th percentile (Q3) of the IL-6 column are calculated, to identify potential outliers. Outliers are then removed.
+
+```{r}
+
+data <- merge(meta_data, df_combined, by = "donor_id")
+
+# Calculate Q1 (25th percentile) and Q3 (75th percentile) for IL-6 levels
+Q1 <- quantile(data$IL6, 0.25, na.rm = TRUE)
+Q3 <- quantile(data$IL6, 0.75, na.rm = TRUE)
+
+# Calculate the IQR
+IQR_value <- Q3 - Q1
+
+# Define lower and upper bounds for outliers
+lower_bound <- Q1 - 1.5 * IQR_value
+upper_bound <- Q3 + 1.5 * IQR_value
+
+# Remove outliers by filtering the data
+data_no_outliers <- data %>% filter(IL6 >= lower_bound & IL6 <= upper_bound)
+
+# Check the result
+head(data_no_outliers)
+
+```
+
+25.As a visualization for continuous variables, IL-6 levels in relation to age were analyzed. Outliers were identified and removed during this process. After cleaning, it was observed that most IL-6 expression data was concentrated between the ages of 12.5 and 25 
+
+```{r}
+
+# Boxplot for IL-6 levels by gender
+ggplot(data_no_outliers, aes(x = gender, y = IL6, fill = gender)) +
+  geom_boxplot(alpha = 0.6) +
+  labs(
+    title = "IL-6 Levels by Gender (Without Outliers)",
+    x = "Gender",
+    y = "IL-6 Level"
+  ) +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "pink")) +  # Change colors
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"  # Remove legend for simplicity
+  )
+
+```
+
+26.As a visualization for categorical variables, IL-6 levels by gender were compared out of interest. Outliers were identified and removed during this analysis. After cleaning, the distribution of IL-6 showed higher expression in males compared to females, indicating a significant difference in IL-6 levels between genders 
+
+```{r}
+ggplot(data_no_outliers, aes(x = visit_age, y = IL6)) +
+  geom_jitter(width = 0.1, size = 3, color = "black") +  # Jitter for better spread of points
+  labs(title = "IL-6 levels by Age (Without Outliers)", x = "Age", y = "IL-6 Level") +
+  theme_minimal()
+```
+
+27. During the data exploration of hypothesis 2, boxplots were created to visualize the distribution of IL-6 levels across the seven different HLA cell types. The boxplots showed similar distributions for all HLA cell types, indicating no apparent differences in IL-6 expression 
+
+```{r}
+
+# Check column names
+colnames(data_no_outliers)
+
+# Select the relevant columns
+relevant_data <- data_no_outliers %>%
+  select(IL6, `HLADR+ NK cells`, `HLADR+CD38+CD4+ T cells`, `HLADR+CD38+CD8+ T cells`,
+         `HLADR+CD38-CD4+ T cells`, `HLADR+CD38-CD8+ T cells`, `HLADR-CD38+CD4+ T cells`,
+         `HLADR-CD38+CD8+ T cells`)
+
+# Pivot data to long format
+long_data <- relevant_data %>%
+  pivot_longer(
+    cols = -IL6,  # All columns except IL6 are changed
+    names_to = "Cell_Type",  # New column for cell types
+    values_to = "Cell_Count"  # New column for cell counts
+  )
+
+# Remove rows where the cell count is 0 or NA
+long_data <- long_data %>% filter(!is.na(Cell_Count) & Cell_Count > 0)
+
+# Visualize the IL-6 levels for each cell type
+ggplot(long_data, aes(x = Cell_Type, y = IL6, fill = Cell_Type)) +
+  geom_boxplot() +
+  labs(title = "IL-6 Levels Across Different Cell Types", x = "Cell Type", y = "IL-6 Level") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+28. Since the IL-6 levels seem to be the same across the different cell types, we will continue with the total cell count for each cell type. To further investigate, the total cell count per HLA cell type and the median IL-6 levels were first calculated and stored in a data frame for observation. 
+
+```{r}
+
+# Calculate Total_Cell_Count for each Cell_Type and Median IL6
+hla_summary <- long_data %>%
+  group_by(Cell_Type) %>%
+  summarise(
+    Total_Cell_Count = sum(Cell_Count, na.rm = TRUE),  # Sum cells by Cell_Type
+    Median_IL6 = median(IL6, na.rm = TRUE),  # Calculate median IL6 by Cell_Type
+    .groups = "drop"
+  )
+
+# View summary
+print(hla_summary)
+```
+
+29. Following this, a distribution of the HLA cell types per cell count was visualized in a scatterplot. This step helped to understand the variations in cell counts across different cell types and their possible relationship with IL-6 levels.
+
+```{r}
+
+# Filter the top 10 cell counts by Cell_Type
+top_10_hla_data <- long_data %>%
+  group_by(Cell_Type) %>%
+  arrange(desc(Cell_Count)) %>%
+  slice_head(n = 10)  # Select to 10 cells for each Cell_Type
+
+# Make a scatterplot for the top 10 Cell_Count by Cell_Type
+ggplot(top_10_hla_data, aes(x = Cell_Type, y = Cell_Count)) +
+  geom_point(aes(color = Cell_Type), alpha = 0.7) +  # Add colored dots for each Cell_Type
+  labs(title = "Cell Count Distribution by Cell Type",
+       x = "Cell Type", y = "Cell Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Turn labels on the x-axis
+
+```
+
+30. This distribution of the HLA cell types per cell count was also visualized in boxplots.
+
+```{r}
+
+# Make a boxplot for the top 10 Cell_Count by Cell_Type
+ggplot(top_10_hla_data, aes(x = Cell_Type, y = Cell_Count)) +
+  geom_boxplot(aes(color = Cell_Type), fill = "lightblue", alpha = 0.7) +  # Add boxplot
+  labs(title = "Cell Count Distribution by Cell Type",
+       x = " HLA Cell Type", y = "Cell Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Turn labels on the x-axis
+
+```
+The analysis revealed that HLADR-CD38+CD4+ T cells and HLADR-CD38+CD8+ T cells exhibited notably higher cell counts compared to other HLA cell types.
+
+31. Subsequently, two types of scatterplots were created. The first one, a combined scatterplot, shows IL-6 levels across all HLA-related cell types. The second set provides a more detailed view, illustrating IL-6 levels for each individual cell type. These observations guide the analysis of how variations in cell counts may relate to IL-6 levels, helping to gain insights into immune response mechanisms. 
+
+```{r}
+
+# Remove rows where IL-6 levels are larger than 100
+long_hla_data <- long_data %>%  filter(IL6 > 100)
+print(long_hla_data)
+
+# Make a scatterplot for IL-6 levels for each cell type with x-axis limitation
+ggplot(long_hla_data, aes(x = Cell_Count, y = IL6, color = Cell_Type)) +
+  geom_point(size = 3, alpha = 0.7) +
+  labs(title = "Scatterplot of IL-6 Levels Across HLA-related Cell Types",
+       x = "Cell Count",
+       y = "IL-6 Level",
+       color = "Cell Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlim(0, 10)  # Limit the x-axis to a maximum of 20
+
+```
+
+```{r}
+
+# Make a scatterplot with facets and x-axis limitation
+ggplot(long_hla_data, aes(x = Cell_Count, y = IL6)) +
+  geom_point(size = 3, alpha = 0.7, color = "pink") +  # Uniform color for simplicity
+  facet_wrap(~ Cell_Type, scales = "free") +  # One subplot for each cell type
+  labs(title = "Scatterplot of IL-6 Levels for Each Cell Type",
+       x = "Cell Count",
+       y = "IL-6 Level") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 10),  # Adjust size of the facet-titels
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlim(0, 10)  # Limit the x-axis to a maximum of 20
+
+```
+
+32. Lastly, a histogram of IL-6 levels for each cell type was created.
+
+```{r}
+
+# A normal distribution graph of the IL-6 levels by cell type
+ggplot(long_hla_data, aes(x = IL6)) +
+  geom_density(aes(fill = Cell_Type), alpha = 0.6) +  # Density plot with colors by celtype
+  facet_wrap(~ Cell_Type, scales = "free") +  # One subplot for each cell type
+  labs(title = "Normal Distribution of IL-6 Levels for Each Cell Type",
+       x = "IL-6 Level",
+       y = "Density") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 10),  # Adjust size of the facet-titels
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+33. The distribution of IL-6 levels was found to be skewed, which can violate the assumptions of normality. To address this, a log transformation was applied to the IL-6 data, which helps to normalize the skewed distribution, making the data more suitable for further analysis. Additionally, the geometric mean was included, as it is more appropriate for skewed data, providing a more accurate measure of central tendency by reducing the influence of extreme values.
+
+```{r}
+# Log-transformation of IL-6
+long_hla_data <- long_hla_data %>%
+  mutate(IL6_log = log(IL6))  # Log-transformation
+
+# Make a new density plot for the log-transformation of IL-6
+ggplot(long_hla_data, aes(x = IL6_log)) +
+  geom_density(aes(fill = Cell_Type), alpha = 0.6) +  # Density plot with colors by celtype
+  facet_wrap(~ Cell_Type, scales = "free") +  # One subplot for each cell type
+  labs(title = "Log-transformed IL-6 Levels for Each Cell Type",
+       x = "Log-transformed IL-6 Level",
+       y = "Density") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 10),  # Adjust size of the facet-titels
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+These curves reveal again that the IL-6 level distributions follow similar patterns across all cell types, indicating consistent distribution characteristics regardless of cell type.
+
+34. Next, we want to visually inspect the four key model assumptions (linearity, independence, homoscedasticity, and normality of residuals) using diagnostic plots. 
+
+```{r}
+
+# Fit the regression model with log-transformed IL-6
+model_log <- lm(IL6 ~ Cell_Count, data = long_hla_data)
+
+# Generate the four standard diagnostic plots
+par(mfrow = c(2, 2))  # Create a 2x2 grid for the plots
+plot(model_log)
+
+# Add title 
+title(main = "Diagnostic Plots for the Log-Transformed IL-6 Model", outer = TRUE)
+
+```
+35.It is found that none of the assumptions are satisfied, despite the data already being log-transformed. The plots reveal issues with linearity, homoscedasticity, and non-normal residuals. Given these violations, a simple linear regression model is not appropriate. Therefore, alternative methods will be considered to better handle the data and its characteristics. 
+
+
+36. Since the assumptions for ANOVA were not met, a Kruskal-Wallis rank sum test was used to assess differences in IL-6 levels across the different cell types and their corresponding cell counts. The result, with a chi-squared value of 281.34, indicates how much the observed differences deviate from what we would expect under the null hypothesis, and a p-value of 0.3673 shows no significant differences. This suggests that the interaction does not affect IL-6 levels, meaning the null hypothesis cannot be rejected.
+
+```{r}
+
+# Perform a Kruskal-Wallis test for IL6 by Cell_Type and Cell_Count
+kruskal_result <- kruskal.test(IL6 ~ interaction(Cell_Type, Cell_Count), data = long_hla_data)
+
+# Print results
+print(kruskal_result)
+
+```
+
+37. A Spearman's rank correlation test was performed to assess the relationship between IL-6 levels and cell counts. The test showed a weak positive correlation (rho = 0.131) with a significant p-value of 0.022. This indicates a statistically significant, though weak, monotonic relationship between the two variables.
+
+```{r}
+
+cor.test(long_hla_data$IL6, long_hla_data$Cell_Count, method = "spearman")
+
+```
+
+38. To confirm the Spearman correlation results, a correlation heatmap was created. The heatmap revealed beige zones between IL-6 and cell counts per HLA cell type, indicating areas where the correlation is weaker. This map supports the weak positive correlation observed in the statistical analysis, providing a clear graphical representation of the relationship between the variables.
+
+```{r}
+
+# Calculate mean Cell_Count for each Cell_Type and donor
+hla_summary <- long_hla_data %>%
+  group_by(Cell_Type, IL6) %>%
+  summarize(Avg_Cell_Count = mean(Cell_Count, na.rm = TRUE), .groups = "drop")
+
+# Pivor wider dataset
+hla_wide <- hla_summary %>%
+  pivot_wider(names_from = Cell_Type, values_from = Avg_Cell_Count)
+
+# Check the correlationmatrix
+correlation_matrix <- cor(hla_wide, method = "spearman", use = "complete.obs")  
+
+# Transform matrix into long format
+correlation_data <- melt(correlation_matrix)
+
+# Make a heatmap
+ggplot(correlation_data, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+  labs(
+    title = "Spearman Correlation Heatmap: IL6 Level and HLA Cell Counts",
+    x = "Variables",
+    y = "Variables",
+    fill = "Correlation"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+39.Overal conclusion of hypothesis 2: The analysis of the relationship between HLA cell counts and IL-6 release showed a weak positive correlation (rho = 0.131, p = 0.022) and a low R-squared value (0.02612), indicating that HLA cell counts only explain a small portion of the variability in IL-6 levels. Boxplots and scatterplots revealed similar IL-6 distributions across HLA cell types. The Kruskal-Wallis test showed no significant differences in IL-6 levels between the cell types (p = 0.3673). 
+Given that the HLA-DR-CD38+CD4+ T cells and HLA-DR-CD38+CD8+ T cells showed high cell counts, one would expect a stronger correlation with IL-6 levels. However, despite these higher cell counts, the heatmap revealed weak correlations ranging from 0.0 to 0.25 for these cell types, which is somewhat unexpected. These findings suggest that while there is some correlation between cell counts and IL-6, it is likely that other factors play a more significant role in IL-6 variation. 
+
+**MACHINE LEARNING**
+
+40. Install the necessary packages for the machine learning part
+
+```{r}
+# Install packages
+install.packages("ROSE")
+install.packages("caret")
+install.packages("xgboost")
+install.packages("ROCR")
+install.packages("pdp")
+install.packages("ggplot2")
+install.packages("gridExtra")
+```
+
+41. Load the required libraries
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(randomForest)
+library(ROSE)
+library(xgboost)
+library(pROC)
+library(ROCR)
+library(ggplot2)
+library(pdp)
+library(gridExtra)
+```
+
+42. We load the dataset that is used for the machine learning part, we remove the rows that have NA/NULL for the vaccine_response and convert vaccine_response into a factor so we can preform binary classification on this feature.
+
+```{r}
+# Load the dataset
+df <- merge(meta_data, df_combined, by = "donor_id")
+df$B.cells <- df$`B cells`
+```
+
+```{r}
+# Handle missing data
+# Remove rows with missing vaccine_response
+df <- df %>% filter(!is.na(vaccine_response))
+df <- df %>% filter(vaccine_response != "NULL")
+
+# Convert vaccine_response to a factor (binary classification)
+df$vaccine_response <- as.factor(df$vaccine_response)
+
+# Check class distribution
+table(df$vaccine_response)
+```
+The class distribution shows that the data is not evenly distributed. Therefore, we will balance it later with the ROSE package.
+
+43. We select the features we will use for the classification and visualize the dataframe. This allows for a visual inspection of the type of features and the distribution of NAs. The features were selected for their relevance to health, immune response and prior exposure.
+
+```{r}
+df <- df %>% select("vaccine_response", "B.cells", "bmi", "visit_age", "geo_mean", "gender", "vaccine", "influenza_infection_history")
+print(df,400)
+```
+This dataframe reveals that there are missing values for vaccine, bmi and B.cells. However, there seems to be no clear relation between the presence of the missing values and certain patients.
+
+44. Missing values were identified within the dataframe. We will thus quantify the extent of missing data by counting the number of missing values in each variable.
+
+```{r}
+missing_values <- data.frame( 
+  MissingCount = sapply(df, function(x) sum(is.na(x) | x == "NULL"))
+)
+
+missing_values
+```
+The larges amount of missing values for one feature is 104 this is less than 1/3 of all the entries (363). Therefore, the features containing missing data will still be included in the following steps.
+
+45. Gender is converted into a binary factor to simplify further steps. All other features are put into their correct format.
+
+```{r}
+# Encode gender
+df$gender <- ifelse(df$gender == "Female", 1, 0)
+
+# Put all columns in the correct format
+df$vaccine_response <- as.character(df$vaccine_response)
+
+df$vaccine <- factor(df$vaccine)
+df$gender <- factor(df$gender)
+df$influenza_infection_history <- factor(df$influenza_infection_history)
+
+df$bmi <- as.numeric(df$bmi)
+df$visit_age <- as.numeric(df$visit_age)
+df$B.cells <- as.numeric(df$B.cells)
+df$geo_mean <- as.numeric(df$geo_mean)
+
+```
+
+46. All the numeric features are normalized
+
+```{r}
+# Centering and scaling (ignore NAs)
+df_scaled <- df %>%
+  mutate(across(where(is.numeric), ~ ifelse(!is.na(.), (. - mean(., na.rm = TRUE)) / sd(., na.rm = TRUE), NA)))
+
+# Check the  rows of the scaled dataframe
+head(df_scaled)
+```
+
+47. Since the data was not evenly distributed, it is balanced using the ROSE package.
+
+```{r}
+# Partial balancing the data with ROSE
+set.seed(123)
+balanced_data <- ROSE(
+  vaccine_response ~ bmi + B.cells + visit_age + geo_mean + gender + vaccine + influenza_infection_history, 
+  data = df_scaled, 
+  seed = 1,
+  N = nrow(df_scaled)  # Maintain the same dataset size
+)$data
+
+# Check new class distribution
+table(balanced_data$vaccine_response)
+```
+This seems to be a more evenly distributed dataset.
+
+48. The dataset is then split into a train and test set.
+
+```{r}
+# Split balanced data into 75/25 train-test sets
+set.seed(123)
+train_index <- sample(seq_len(nrow(df_scaled)), size = 0.75 * nrow(df_scaled))
+train_data <- balanced_data[train_index, ]
+test_data <- balanced_data[-train_index, ]
+
+train_data$vaccine_response <- as.numeric(train_data$vaccine_response)
+test_data$vaccine_response <- as.numeric(test_data$vaccine_response)
+```
+
+49. A logistic regression is fit on the data. The confusion matrix and accuracy are shown as evaluation parameters.
+
+```{r}
+# Fit Logistic Regression (baseline model)
+lr_model <- glm(vaccine_response ~  bmi + B.cells + visit_age + geo_mean + gender + vaccine + influenza_infection_history, data = train_data, family = "binomial")
+
+# Evaluate Logistic Regression
+lr_probs <- predict(lr_model, newdata = test_data, type = "response")
+lr_preds <- ifelse(lr_probs > 0.5, 1, 0)
+
+# Confusion matrix and metrics
+lr_conf_matrix <- table(Predicted = lr_preds, Actual = test_data$vaccine_response)
+cat("Logistic Regression Metrics:\n")
+print(lr_conf_matrix)
+
+# Print Accuracy
+accuracy <- sum(diag(lr_conf_matrix)) / sum(lr_conf_matrix)
+cat("Accuracy: ", accuracy, "\n")
+```
+
+50. A XGBoost model is fit on the data. The confusion matrix and accuracy are shown as evaluation parameters.
+
+```{r}
+train_data <- train_data %>%
+  mutate(across(where(is.factor), ~ as.numeric(as.factor(.))))
+test_data <- test_data %>%
+  mutate(across(where(is.factor), ~ as.numeric(as.factor(.))))
+
+# Fit XGBoost (advanced model)
+xgb_train <- xgb.DMatrix(data = as.matrix(train_data %>% select(-vaccine_response)), 
+                         label = train_data$vaccine_response)
+xgb_test <- xgb.DMatrix(data = as.matrix(test_data %>% select(-vaccine_response)), 
+                        label = test_data$vaccine_response)
+
+xgb_params <- list(objective = "binary:logistic", eval_metric = "auc")
+xgb_model <- xgboost(data = xgb_train, params = xgb_params, nrounds = 100)
+
+# Evaluate XGBoost
+xgb_probs <- predict(xgb_model, newdata = xgb_test)
+xgb_preds <- ifelse(xgb_probs > 0.5, 1, 0)
+xgb_conf_matrix <- table(Predicted = xgb_preds, Actual = test_data$vaccine_response)
+cat("XGBoost Metrics:\n")
+print(xgb_conf_matrix)
+
+# Print Accuracy
+accuracy <- sum(diag(xgb_conf_matrix)) / sum(xgb_conf_matrix)
+cat("Accuracy: ", accuracy, "\n")
+```
+
+51. A random forest is fit on the data. The confusion matrix and accuracy are shown as evaluation parameters.
+
+```{r}
+# Train the Random Forest model
+set.seed(123)
+rf_model <- randomForest(
+  vaccine_response ~ bmi + B.cells + visit_age + geo_mean + gender + vaccine + influenza_infection_history, 
+  data = train_data, 
+  ntree = 100,
+  importance = TRUE
+)
+
+# Add a title to the Random Forest evaluation results
+cat("Random Forest Model Evaluation\n")
+
+
+# Make predictions on the test set
+predicted_probabilities <- predict(rf_model, newdata = test_data)
+predicted_classes <- ifelse(predicted_probabilities > 0.5, 1, 0)
+
+# Confusion matrix and accuracy
+confusion_matrix <- table(Predicted = predicted_classes, Actual = test_data$vaccine_response)
+print(confusion_matrix)
+
+# Print Accuracy Random Forest
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+cat("Accuracy: ", accuracy, "\n")
+
+```
+
+52. To further evaluate the model performances ROC curves are generated for all models.
+
+```{r}
+# Visualize Model Performance (ROC Curves)
+roc_curve_lr <- roc(test_data$vaccine_response, lr_probs)
+roc_curve_rf <- roc(test_data$vaccine_response, as.numeric(predicted_classes))
+roc_curve_xgb <- roc(test_data$vaccine_response, xgb_probs)
+
+# Calculate AUC for each model
+auc_lr <- auc(roc_curve_lr)
+auc_rf <- auc(roc_curve_rf)
+auc_xgb <- auc(roc_curve_xgb)
+
+# Print AUC values
+cat("AUC for Logistic Regression:", auc_lr, "\n")
+cat("AUC for Random Forest:", auc_rf, "\n")
+cat("AUC for XGBoost:", auc_xgb, "\n")
+
+plot(roc_curve_lr, col = "blue", main = "ROC curves for each model")
+plot(roc_curve_rf, col = "red", add = TRUE)
+plot(roc_curve_xgb, col = "green", add = TRUE)
+legend("bottomright", legend = c("Logistic Regression", "Random Forest", "XGBoost"),
+       col = c("blue", "red", "green"), lwd = 2)
+```
+The XGBoost model shows the highest area under the curve (AUC), indicating that this is the best model. It has an AUC of 0.7524 which means that the model is good but it could still use some improvements. This can also be visually seen on the ROC curve.
+
+53. To evaluate feature significance, a feature importance plot was generated for the XGBoost model.
+
+```{r}
+# Extract feature importance as a data frame
+importance_df <- xgb.importance(model = xgb_model)
+
+# Plot with ggplot2
+ggplot(importance_df, aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "XGBoost Feature Importance", x = "Features", y = "Gain") +
+  theme_minimal()
+```
+
+To evaluate feature significance, a feature importance plot was generated for the XGBoost model. This shows that B cells clearly have the largest impact on the model, with a significantly higher Gain value compared to the other variables. The features visit_age, bmi and geo_mean also show strong importance, suggesting they are key factors influencing the model's decisions. Meanwhile, gender and vaccine contribute moderately, adding valuable but less substantial information. Influenza_infection_history contributes very little, with a near-zero Gain value. This suggests that it may not add meaningful predictive power. 
+
+
+54. Partial dependence plot for geo_mean and B.cells
+
+```{r}
+# Check structure of PDP data to identify column names
+str(pdp_geo_mean)
+str(pdp_B_cells)
+
+# Adjust ggplot code to use the correct column names
+plot_geo_mean <- ggplot(pdp_geo_mean, aes(x = geo_mean, y = yhat)) +  # Use actual column names
+  geom_line(color = "blue", size = 1) +
+  labs(title = "Partial Dependence Plot for geo_mean", x = "geo_mean", y = "Prediction") +
+  theme_minimal()
+
+plot_B_cells <- ggplot(pdp_B_cells, aes(x = B.cells, y = yhat)) +  # Use actual column names
+  geom_line(color = "green", size = 1) +
+  labs(title = "Partial Dependence Plot for B.cells", x = "B.cells", y = "Prediction") +
+  theme_minimal()
+
+# Combine both plots into a 2x1 layout
+grid.arrange(plot_geo_mean, plot_B_cells, ncol = 1)
+
+```
+The partial dependence plots were made to illustrate how the features geo_mean and B.cells influence the model's predictions when all other variables are held constant. 
+
+For geo_mean, the predictions fluctuate considerably at lower values. However, as geo_mean increases, beyond approximately 1, the predictions stabilize at a consistently low level. This indicates that higher geo_mean values negatively affect the predicted outcome, while lower values introduce variability. This means that the model may be particularly sensitive to geo_mean in this range. 
+
+B.cells exhibits a non-linear relationship with the predictions. At very low values, the predictions remain low, but as B.cells increases toward 0, the predicted outcome rises significantly. As B.cells surpasses approximately 1.5, the predictions sharply decline and stabilize at a low level. This suggests that moderate values of B.cells positively influence the model's predictions, while both very low and very high values reduce the predicted response. 
+
+We can thus conclude that geo_mean predominantly suppresses predictions as its values increase. In contrast, B.cells has an optimal range where its influence is most positive, with extremes in either direction leading to reduced predictions.  
